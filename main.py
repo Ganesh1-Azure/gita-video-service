@@ -9,12 +9,6 @@ def render_video():
         audio_file = request.files.get('audio')
         image_file = request.files.get('image')
         music_url = request.form.get('music_url')
-        sanskrit = request.form.get('sanskrit', '')
-        translation = request.form.get('translation', '')
-        telugu = request.form.get('telugu_translation', '')
-        chapter_verse = request.form.get('chapter_verse', '')
-
-        font = '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf'
 
         with tempfile.TemporaryDirectory() as tmpdir:
             img_path = os.path.join(tmpdir, 'image.jpg')
@@ -37,33 +31,15 @@ def render_video():
                 mixed_path
             ], check=True)
 
-            chapter_file = os.path.join(tmpdir, 'chapter.txt')
-            sanskrit_file = os.path.join(tmpdir, 'sanskrit.txt')
-            translation_file = os.path.join(tmpdir, 'translation.txt')
-            telugu_file = os.path.join(tmpdir, 'telugu.txt')
-
-            with open(chapter_file, 'w', encoding='utf-8') as f:
-                f.write(chapter_verse)
-            with open(sanskrit_file, 'w', encoding='utf-8') as f:
-                f.write(sanskrit)
-            with open(translation_file, 'w', encoding='utf-8') as f:
-                f.write(translation)
-            with open(telugu_file, 'w', encoding='utf-8') as f:
-                f.write(telugu)
-
             output_path = os.path.join(tmpdir, 'output.mp4')
             subprocess.run([
                 'ffmpeg', '-y',
                 '-loop', '1', '-i', img_path,
                 '-i', mixed_path,
-                '-vf', (
-                    f"drawtext=fontfile='{font}':textfile='{chapter_file}':fontcolor=white:fontsize=28:x=(w-text_w)/2:y=30:box=1:boxcolor=black@0.5:boxborderw=10,"
-                    f"drawtext=fontfile='{font}':textfile='{sanskrit_file}':fontcolor=yellow:fontsize=20:x=(w-text_w)/2:y=h-220:box=1:boxcolor=black@0.6:boxborderw=8,"
-                    f"drawtext=fontfile='{font}':textfile='{translation_file}':fontcolor=white:fontsize=16:x=(w-text_w)/2:y=h-160:box=1:boxcolor=black@0.6:boxborderw=8,"
-                    f"drawtext=fontfile='{font}':textfile='{telugu_file}':fontcolor=cyan:fontsize=16:x=(w-text_w)/2:y=h-100:box=1:boxcolor=black@0.6:boxborderw=8"
-                ),
-                '-c:v', 'libx264', '-tune', 'stillimage',
-                '-c:a', 'aac', '-b:a', '192k',
+                '-c:v', 'libx264',
+                '-tune', 'stillimage',
+                '-c:a', 'aac',
+                '-b:a', '192k',
                 '-pix_fmt', 'yuv420p',
                 '-shortest',
                 output_path
