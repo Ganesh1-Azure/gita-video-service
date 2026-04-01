@@ -18,21 +18,35 @@ def render_video():
             image_file.save(img_path)
             audio_file.save(audio_path)
 
+            # Check file sizes
+            img_size = os.path.getsize(img_path)
+            audio_size = os.path.getsize(audio_path)
+
             r = requests.get(music_url, timeout=30)
             with open(music_path, 'wb') as f:
                 f.write(r.content)
+            music_size = os.path.getsize(music_path)
 
             mixed_path = os.path.join(tmpdir, 'mixed.mp3')
-            subprocess.run([
+            mix_result = subprocess.run([
                 'ffmpeg', '-y',
                 '-i', audio_path,
                 '-i', music_path,
                 '-filter_complex', '[1:a]volume=0.15[bg];[0:a][bg]amix=inputs=2:duration=first',
                 mixed_path
-            ], check=True)
+            ], capture_output=True, text=True)
+
+            if mix_result.returncode != 0:
+                return jsonify({
+                    'error': 'Audio mix failed',
+                    'stderr': mix_result.stderr,
+                    'img_size': img_size,
+                    'audio_size': audio_size,
+                    'music_size': music_size
+                }), 500
 
             output_path = os.path.join(tmpdir, 'output.mp4')
-            subprocess.run([
+            render_result = subprocess.run([
                 'ffmpeg', '-y',
                 '-loop', '1', '-i', img_path,
                 '-i', mixed_path,
@@ -43,7 +57,13 @@ def render_video():
                 '-pix_fmt', 'yuv420p',
                 '-shortest',
                 output_path
-            ], check=True)
+            ], capture_output=True, text=True)
+
+            if render_result.returncode != 0:
+                return jsonify({
+                    'error': 'Video render failed',
+                    'stderr': render_result.stderr
+                }), 500
 
             return send_file(output_path, mimetype='video/mp4',
                            as_attachment=True, download_name='output.mp4')
