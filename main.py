@@ -46,16 +46,19 @@ def render_video():
 
         # Step 2: Render video
         render_result = subprocess.run([
-            'ffmpeg', '-y',
-            '-loop', '1', '-i', img_path,
-            '-i', mixed_path,
-            '-c:v', 'libx264',
-            '-tune', 'stillimage',
-            '-c:a', 'aac',
-            '-b:a', '192k',
-            '-pix_fmt', 'yuv420p',
-            '-shortest',
-            output_path
+        'ffmpeg', '-y',
+        '-loop', '1', '-i', img_path,
+        '-i', mixed_path,
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',     # ← uses much less memory
+        '-tune', 'stillimage',
+        '-c:a', 'aac',
+        '-b:a', '128k',             # ← reduced from 192k
+        '-pix_fmt', 'yuv420p',
+        '-vf', 'scale=720:720',     # ← scale down from 1024x1024
+        '-threads', '1',            # ← limit threads = less memory
+        '-shortest',
+        output_path
         ], capture_output=True, text=True, timeout=240)
 
         if render_result.returncode != 0:
