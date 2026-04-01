@@ -35,7 +35,20 @@ def render_video():
                 mixed_path
             ], check=True)
 
-            def esc(t): return t.replace("'", "\\'").replace(":", "\\:").replace("%", "\\%")
+            # Write text files instead of using drawtext
+            chapter_file = os.path.join(tmpdir, 'chapter.txt')
+            sanskrit_file = os.path.join(tmpdir, 'sanskrit.txt')
+            translation_file = os.path.join(tmpdir, 'translation.txt')
+            telugu_file = os.path.join(tmpdir, 'telugu.txt')
+
+            with open(chapter_file, 'w', encoding='utf-8') as f:
+                f.write(chapter_verse)
+            with open(sanskrit_file, 'w', encoding='utf-8') as f:
+                f.write(sanskrit)
+            with open(translation_file, 'w', encoding='utf-8') as f:
+                f.write(translation)
+            with open(telugu_file, 'w', encoding='utf-8') as f:
+                f.write(telugu)
 
             output_path = os.path.join(tmpdir, 'output.mp4')
             subprocess.run([
@@ -43,10 +56,10 @@ def render_video():
                 '-loop', '1', '-i', img_path,
                 '-i', mixed_path,
                 '-vf', (
-                    f"drawtext=text='{esc(chapter_verse)}':fontcolor=white:fontsize=28:x=(w-text_w)/2:y=30:box=1:boxcolor=black@0.5:boxborderw=10,"
-                    f"drawtext=text='{esc(sanskrit)}':fontcolor=yellow:fontsize=20:x=(w-text_w)/2:y=h-220:box=1:boxcolor=black@0.6:boxborderw=8,"
-                    f"drawtext=text='{esc(translation)}':fontcolor=white:fontsize=16:x=(w-text_w)/2:y=h-160:box=1:boxcolor=black@0.6:boxborderw=8,"
-                    f"drawtext=text='{esc(telugu)}':fontcolor=cyan:fontsize=16:x=(w-text_w)/2:y=h-100:box=1:boxcolor=black@0.6:boxborderw=8"
+                    f"drawtext=textfile='{chapter_file}':fontcolor=white:fontsize=28:x=(w-text_w)/2:y=30:box=1:boxcolor=black@0.5:boxborderw=10,"
+                    f"drawtext=textfile='{sanskrit_file}':fontcolor=yellow:fontsize=20:x=(w-text_w)/2:y=h-220:box=1:boxcolor=black@0.6:boxborderw=8,"
+                    f"drawtext=textfile='{translation_file}':fontcolor=white:fontsize=16:x=(w-text_w)/2:y=h-160:box=1:boxcolor=black@0.6:boxborderw=8,"
+                    f"drawtext=textfile='{telugu_file}':fontcolor=cyan:fontsize=16:x=(w-text_w)/2:y=h-100:box=1:boxcolor=black@0.6:boxborderw=8"
                 ),
                 '-c:v', 'libx264', '-tune', 'stillimage',
                 '-c:a', 'aac', '-b:a', '192k',
