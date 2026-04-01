@@ -14,6 +14,8 @@ def render_video():
         telugu = request.form.get('telugu_translation', '')
         chapter_verse = request.form.get('chapter_verse', '')
 
+        font = '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf'
+
         with tempfile.TemporaryDirectory() as tmpdir:
             img_path = os.path.join(tmpdir, 'image.jpg')
             audio_path = os.path.join(tmpdir, 'narration.mp3')
@@ -35,7 +37,6 @@ def render_video():
                 mixed_path
             ], check=True)
 
-            # Write text files instead of using drawtext
             chapter_file = os.path.join(tmpdir, 'chapter.txt')
             sanskrit_file = os.path.join(tmpdir, 'sanskrit.txt')
             translation_file = os.path.join(tmpdir, 'translation.txt')
@@ -56,10 +57,10 @@ def render_video():
                 '-loop', '1', '-i', img_path,
                 '-i', mixed_path,
                 '-vf', (
-                    f"drawtext=textfile='{chapter_file}':fontcolor=white:fontsize=28:x=(w-text_w)/2:y=30:box=1:boxcolor=black@0.5:boxborderw=10,"
-                    f"drawtext=textfile='{sanskrit_file}':fontcolor=yellow:fontsize=20:x=(w-text_w)/2:y=h-220:box=1:boxcolor=black@0.6:boxborderw=8,"
-                    f"drawtext=textfile='{translation_file}':fontcolor=white:fontsize=16:x=(w-text_w)/2:y=h-160:box=1:boxcolor=black@0.6:boxborderw=8,"
-                    f"drawtext=textfile='{telugu_file}':fontcolor=cyan:fontsize=16:x=(w-text_w)/2:y=h-100:box=1:boxcolor=black@0.6:boxborderw=8"
+                    f"drawtext=fontfile='{font}':textfile='{chapter_file}':fontcolor=white:fontsize=28:x=(w-text_w)/2:y=30:box=1:boxcolor=black@0.5:boxborderw=10,"
+                    f"drawtext=fontfile='{font}':textfile='{sanskrit_file}':fontcolor=yellow:fontsize=20:x=(w-text_w)/2:y=h-220:box=1:boxcolor=black@0.6:boxborderw=8,"
+                    f"drawtext=fontfile='{font}':textfile='{translation_file}':fontcolor=white:fontsize=16:x=(w-text_w)/2:y=h-160:box=1:boxcolor=black@0.6:boxborderw=8,"
+                    f"drawtext=fontfile='{font}':textfile='{telugu_file}':fontcolor=cyan:fontsize=16:x=(w-text_w)/2:y=h-100:box=1:boxcolor=black@0.6:boxborderw=8"
                 ),
                 '-c:v', 'libx264', '-tune', 'stillimage',
                 '-c:a', 'aac', '-b:a', '192k',
