@@ -5,7 +5,7 @@ import textwrap
 
 app = Flask(__name__)
 
-def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning, chapter, verse):
+def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning, telugu_translation, chapter, verse):
     img = Image.open(img_path).convert("RGBA")
     img = img.resize((720, 720))
     
@@ -14,16 +14,19 @@ def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning
 
     # Font paths (Noto fonts installed in Docker)
     devanagari_font_path = "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf"
+    telugu_font_path = "/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf"
     latin_font_path = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
     bold_font_path = "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"
 
     # Load fonts
     try:
-        font_sanskrit = ImageFont.truetype(devanagari_font_path, 28)
-        font_meaning = ImageFont.truetype(latin_font_path, 22)
-        font_header = ImageFont.truetype(bold_font_path, 30)
+        font_sanskrit = ImageFont.truetype(devanagari_font_path, 26)
+        font_telugu = ImageFont.truetype(telugu_font_path, 24)
+        font_meaning = ImageFont.truetype(latin_font_path, 20)
+        font_header = ImageFont.truetype(bold_font_path, 28)
     except:
         font_sanskrit = ImageFont.load_default()
+        font_telugu = font_sanskrit
         font_meaning = font_sanskrit
         font_header = font_sanskrit
 
@@ -34,13 +37,15 @@ def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning
     draw.rectangle([0, 0, W, 55], fill=(0, 0, 0, 180))
     draw.text((20, 12), header_text, font=font_header, fill=(255, 215, 0, 255))  # gold
 
-    # --- Bottom bar: Sanskrit + Meaning ---
-    # Wrap sanskrit text
+    # --- Wrap all text sections ---
     sanskrit_lines = textwrap.wrap(sanskrit, width=38)
     meaning_lines = textwrap.wrap(f"Meaning: {meaning}", width=55)
+    telugu_lines = textwrap.wrap(f"తెలుగు: {telugu_translation}", width=40)
 
-    all_lines = sanskrit_lines + [""] + meaning_lines
-    line_height = 36
+    # Combine all lines with separators
+    all_lines = sanskrit_lines + [""] + meaning_lines + [""] + telugu_lines
+
+    line_height = 34
     box_height = len(all_lines) * line_height + 40
     box_y = 720 - box_height
 
@@ -51,13 +56,33 @@ def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning
     draw.line([20, box_y + 8, W - 20, box_y + 8], fill=(255, 215, 0, 200), width=2)
 
     y = box_y + 20
+
+    sanskrit_end = len(sanskrit_lines)
+    meaning_start = sanskrit_end + 1
+    meaning_end = meaning_start + len(meaning_lines)
+    telugu_start = meaning_end + 1
+
     for i, line in enumerate(all_lines):
         if not line:
             y += 10
             continue
-        # Sanskrit lines in gold, meaning in white
-        color = (255, 215, 0, 255) if i < len(sanskrit_lines) else (255, 255, 255, 220)
-        font = font_sanskrit if i < len(sanskrit_lines) else font_meaning
+
+        if i < sanskrit_end:
+            # Sanskrit - gold color
+            color = (255, 215, 0, 255)
+            font = font_sanskrit
+        elif i >= meaning_start and i < meaning_end:
+            # English meaning - white color
+            color = (255, 255, 255, 220)
+            font = font_meaning
+        elif i >= telugu_start:
+            # Telugu - light green color
+            color = (144, 238, 144, 220)
+            font = font_telugu
+        else:
+            color = (255, 255, 255, 220)
+            font = font_meaning
+
         draw.text((20, y), line, font=font, fill=color)
         y += line_height
 
@@ -74,6 +99,7 @@ def render_video():
         music_url = request.form.get('music_url')
         sanskrit = request.form.get('sanskrit', '')
         meaning = request.form.get('meaning', '')
+        telugu_translation = request.form.get('telugu_translation', '')
         chapter = request.form.get('chapter', '')
         verse = request.form.get('verse', '')
         transliteration = request.form.get('transliteration', '')
@@ -101,7 +127,7 @@ def render_video():
             f.write(r.content)
 
         # Draw text on image
-        draw_text_on_image(img_path, img_with_text_path, sanskrit, transliteration, meaning, chapter, verse)
+        draw_text_on_image(img_path, img_with_text_path, sanskrit, transliteration, meaning, telugu_translation, chapter, verse)
 
         # Step 1: Mix audio
         mix_result = subprocess.run([
