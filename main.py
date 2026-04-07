@@ -1,92 +1,106 @@
 import os, subprocess, tempfile, requests
 from flask import Flask, request, jsonify, send_file
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import textwrap
 
 app = Flask(__name__)
 
 def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning, telugu_translation, chapter, verse):
+    # ── Canvas: 720 x 1280 (9:16 YouTube Shorts) ──
+    W, H = 720, 1280
+
+    # Open and fill the full canvas with the image (zoom/crop to fill)
     img = Image.open(img_path).convert("RGBA")
-    img = img.resize((720, 720))
-    
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
+    img_ratio = img.width / img.height
+    target_ratio = W / H
 
-    # Font paths (Noto fonts installed in Docker)
+    if img_ratio > target_ratio:
+        new_h = H
+        new_w = int(H * img_ratio)
+    else:
+        new_w = W
+        new_h = int(W / img_ratio)
+
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    # Center crop
+    left = (new_w - W) // 2
+    top  = (new_h - H) // 2
+    img  = img.crop((left, top, left + W, top + H))
+
+    # Slightly darken image for text readability
+    darkener = Image.new("RGBA", (W, H), (0, 0, 0, 80))
+    img = Image.alpha_composite(img, darkener)
+
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw    = ImageDraw.Draw(overlay)
+
+    # ── Font paths ──
     devanagari_font_path = "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf"
-    telugu_font_path = "/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf"
-    latin_font_path = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
-    bold_font_path = "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"
+    telugu_font_path     = "/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf"
+    latin_font_path      = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+    bold_font_path       = "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"
 
-    # Load fonts
     try:
-        font_sanskrit = ImageFont.truetype(devanagari_font_path, 26)
-        font_telugu = ImageFont.truetype(telugu_font_path, 24)
-        font_meaning = ImageFont.truetype(latin_font_path, 20)
-        font_header = ImageFont.truetype(bold_font_path, 28)
+        font_header   = ImageFont.truetype(bold_font_path,       32)
+        font_sanskrit = ImageFont.truetype(devanagari_font_path, 30)
+        font_meaning  = ImageFont.truetype(latin_font_path,      22)
+        font_telugu   = ImageFont.truetype(telugu_font_path,     26)
+        font_label    = ImageFont.truetype(bold_font_path,       18)
     except:
-        font_sanskrit = ImageFont.load_default()
-        font_telugu = font_sanskrit
-        font_meaning = font_sanskrit
-        font_header = font_sanskrit
+        font_header = font_sanskrit = font_meaning = font_telugu = font_label = ImageFont.load_default()
 
-    W = 720
+    GOLD      = (255, 215,   0, 255)
+    WHITE     = (255, 255, 255, 230)
+    GREEN     = (144, 238, 144, 230)
+    LABEL_COL = (200, 200, 200, 180)
 
-    # --- Top bar: Chapter/Verse label ---
-    header_text = f"Bhagavad Gita | Chapter {chapter} Verse {verse}"
-    draw.rectangle([0, 0, W, 55], fill=(0, 0, 0, 180))
-    draw.text((20, 12), header_text, font=font_header, fill=(255, 215, 0, 255))  # gold
+    # ── TOP HEADER BAR ──
+    draw.rectangle([0, 0, W, 70], fill=(0, 0, 0, 210))
+    draw.rectangle([0, 66, W, 70], fill=GOLD)  # gold accent line
+    header_text = f"Bhagavad Gita  |  Chapter {chapter}  Verse {verse}"
+    draw.text((W // 2, 35), header_text, font=font_header, fill=GOLD, anchor="mm")
 
-    # --- Wrap all text sections ---
-    sanskrit_lines = textwrap.wrap(sanskrit, width=38)
-    meaning_lines = textwrap.wrap(f"Meaning: {meaning}", width=55)
-    telugu_lines = textwrap.wrap(f"తెలుగు: {telugu_translation}", width=40)
+    # ── BOTTOM TEXT PANEL ──
+    panel_top = H - 480
+    draw.rectangle([0, panel_top, W, H], fill=(0, 0, 0, 200))
+    draw.rectangle([0, panel_top, W, panel_top + 4], fill=GOLD)  # gold top border
 
-    # Combine all lines with separators
-    all_lines = sanskrit_lines + [""] + meaning_lines + [""] + telugu_lines
+    pad_x = 28
+    y = panel_top + 22
 
-    line_height = 34
-    box_height = len(all_lines) * line_height + 40
-    box_y = 720 - box_height
+    # Sanskrit
+    draw.text((pad_x, y), "॥ Sanskrit ॥", font=font_label, fill=LABEL_COL)
+    y += 26
+    for line in textwrap.wrap(sanskrit, width=36):
+        draw.text((pad_x, y), line, font=font_sanskrit, fill=GOLD)
+        y += 38
+    y += 10
 
-    # Semi-transparent dark box at bottom
-    draw.rectangle([0, box_y, W, 720], fill=(0, 0, 0, 200))
+    # Divider
+    draw.line([pad_x, y, W - pad_x, y], fill=(255, 255, 255, 60), width=1)
+    y += 14
 
-    # Draw divider line
-    draw.line([20, box_y + 8, W - 20, box_y + 8], fill=(255, 215, 0, 200), width=2)
+    # English Meaning
+    draw.text((pad_x, y), "Meaning", font=font_label, fill=LABEL_COL)
+    y += 26
+    for line in textwrap.wrap(meaning, width=52):
+        draw.text((pad_x, y), line, font=font_meaning, fill=WHITE)
+        y += 30
+    y += 10
 
-    y = box_y + 20
+    # Divider
+    draw.line([pad_x, y, W - pad_x, y], fill=(255, 255, 255, 60), width=1)
+    y += 14
 
-    sanskrit_end = len(sanskrit_lines)
-    meaning_start = sanskrit_end + 1
-    meaning_end = meaning_start + len(meaning_lines)
-    telugu_start = meaning_end + 1
+    # Telugu
+    draw.text((pad_x, y), "తెలుగు అనువాదం", font=font_label, fill=LABEL_COL)
+    y += 26
+    for line in textwrap.wrap(telugu_translation, width=38):
+        draw.text((pad_x, y), line, font=font_telugu, fill=GREEN)
+        y += 36
 
-    for i, line in enumerate(all_lines):
-        if not line:
-            y += 10
-            continue
-
-        if i < sanskrit_end:
-            # Sanskrit - gold color
-            color = (255, 215, 0, 255)
-            font = font_sanskrit
-        elif i >= meaning_start and i < meaning_end:
-            # English meaning - white color
-            color = (255, 255, 255, 220)
-            font = font_meaning
-        elif i >= telugu_start:
-            # Telugu - light green color
-            color = (144, 238, 144, 220)
-            font = font_telugu
-        else:
-            color = (255, 255, 255, 220)
-            font = font_meaning
-
-        draw.text((20, y), line, font=font, fill=color)
-        y += line_height
-
-    # Merge overlay onto image
+    # ── Merge and save ──
     combined = Image.alpha_composite(img, overlay)
     combined.convert("RGB").save(output_path, "JPEG", quality=95)
 
@@ -94,15 +108,15 @@ def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning
 @app.route('/render', methods=['POST'])
 def render_video():
     try:
-        audio_file = request.files.get('audio')
-        image_file = request.files.get('image') or request.files.get('data')
-        music_url = request.form.get('music_url')
-        sanskrit = request.form.get('sanskrit', '')
-        meaning = request.form.get('meaning', '')
+        audio_file         = request.files.get('audio')
+        image_file         = request.files.get('image') or request.files.get('data')
+        music_url          = request.form.get('music_url')
+        sanskrit           = request.form.get('sanskrit', '')
+        meaning            = request.form.get('meaning', '')
         telugu_translation = request.form.get('telugu_translation', '')
-        chapter = request.form.get('chapter', '')
-        verse = request.form.get('verse', '')
-        transliteration = request.form.get('transliteration', '')
+        chapter            = request.form.get('chapter', '')
+        verse              = request.form.get('verse', '')
+        transliteration    = request.form.get('transliteration', '')
 
         if not audio_file:
             return jsonify({'error': 'Missing audio file'}), 400
@@ -111,13 +125,13 @@ def render_video():
         if not music_url:
             return jsonify({'error': 'Missing music_url'}), 400
 
-        tmpdir = tempfile.mkdtemp()
-        img_path = os.path.join(tmpdir, 'image.jpg')
+        tmpdir             = tempfile.mkdtemp()
+        img_path           = os.path.join(tmpdir, 'image.jpg')
         img_with_text_path = os.path.join(tmpdir, 'image_text.jpg')
-        audio_path = os.path.join(tmpdir, 'narration.mp3')
-        music_path = os.path.join(tmpdir, 'music.mp3')
-        mixed_path = os.path.join(tmpdir, 'mixed.mp3')
-        output_path = os.path.join(tmpdir, 'output.mp4')
+        audio_path         = os.path.join(tmpdir, 'narration.mp3')
+        music_path         = os.path.join(tmpdir, 'music.mp3')
+        mixed_path         = os.path.join(tmpdir, 'mixed.mp3')
+        output_path        = os.path.join(tmpdir, 'output.mp4')
 
         image_file.save(img_path)
         audio_file.save(audio_path)
@@ -126,7 +140,6 @@ def render_video():
         with open(music_path, 'wb') as f:
             f.write(r.content)
 
-        # Draw text on image
         draw_text_on_image(img_path, img_with_text_path, sanskrit, transliteration, meaning, telugu_translation, chapter, verse)
 
         # Step 1: Mix audio
@@ -141,7 +154,7 @@ def render_video():
         if mix_result.returncode != 0:
             return jsonify({'error': 'Audio mix failed', 'stderr': mix_result.stderr}), 500
 
-        # Step 2: Render video using image WITH text
+        # Step 2: Render video — 720x1280 (9:16 Shorts format)
         render_result = subprocess.run([
             'ffmpeg', '-y',
             '-loop', '1', '-i', img_with_text_path,
@@ -152,7 +165,7 @@ def render_video():
             '-c:a', 'aac',
             '-b:a', '128k',
             '-pix_fmt', 'yuv420p',
-            '-vf', 'scale=720:720',
+            '-vf', 'scale=720:1280',
             '-threads', '1',
             '-shortest',
             output_path
