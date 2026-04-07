@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y \
     fonts-noto \
     fonts-noto-cjk \
     fonts-noto-extra \
+    fonts-noto-ui-core \
     fontconfig \
     && fc-cache -f -v \
     && rm -rf /var/lib/apt/lists/*
