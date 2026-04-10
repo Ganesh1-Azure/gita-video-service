@@ -6,8 +6,8 @@ import textwrap
 app = Flask(__name__)
 
 def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning, telugu_translation, chapter, verse):
-    # ── Canvas: 720 x 1280 (9:16 YouTube Shorts) ──
-    W, H = 720, 1280
+    # ── Canvas: 1280 * 720 (9:16 YouTube Video) ──
+    W, H = 1280, 720
 
     # Open and fill the full canvas with the image (zoom/crop to fill)
     img = Image.open(img_path).convert("RGBA")
@@ -165,7 +165,7 @@ def render_video():
             '-c:a', 'aac',
             '-b:a', '128k',
             '-pix_fmt', 'yuv420p',
-            '-vf', 'scale=720:1280',
+            '-vf', 'scale=1280:720',
             '-threads', '1',
             '-shortest',
             output_path
