@@ -5,6 +5,12 @@ import textwrap
 
 app = Flask(__name__)
 
+# 🔥 TEXT SHADOW FUNCTION
+def draw_text_shadow(draw, pos, text, font, fill):
+    x, y = pos
+    draw.text((x+2, y+2), text, font=font, fill=(0,0,0,220))
+    draw.text((x, y), text, font=font, fill=fill)
+
 # ---------------- IMAGE + TEXT RENDER ---------------- #
 def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning, telugu_translation, chapter, verse):
     W, H = 1280, 720
@@ -28,8 +34,8 @@ def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning
     top  = (new_h - H) // 2
     img  = img.crop((left, top, left + W, top + H))
 
-    # Light cinematic dark overlay
-    darkener = Image.new("RGBA", (W, H), (0, 0, 0, 50))
+    # Cinematic dark overlay
+    darkener = Image.new("RGBA", (W, H), (0, 0, 0, 60))
     img = Image.alpha_composite(img, darkener)
 
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -37,66 +43,70 @@ def draw_text_on_image(img_path, output_path, sanskrit, transliteration, meaning
 
     # Fonts
     try:
-        font_header   = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", 34)
-        font_sanskrit = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf", 32)
-        font_meaning  = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", 24)
-        font_telugu   = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf", 28)
-        font_label    = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", 18)
+        font_header   = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", 38)
+        font_sanskrit = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf", 36)
+        font_meaning  = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf", 26)
+        font_telugu   = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf", 30)
+        font_label    = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", 20)
     except:
         font_header = font_sanskrit = font_meaning = font_telugu = font_label = ImageFont.load_default()
 
     GOLD  = (255, 215, 0, 255)
-    WHITE = (255, 255, 255, 230)
-    GREEN = (120, 255, 180, 230)
-    LABEL = (200, 200, 200, 180)
+    WHITE = (255, 255, 255, 240)
+    GREEN = (120, 255, 180, 240)
+    LABEL = (200, 200, 200, 200)
 
     # HEADER
-    draw.rectangle([0, 0, W, 60], fill=(0, 0, 0, 160))
-    draw.rectangle([0, 56, W, 60], fill=GOLD)
+    draw.rectangle([0, 0, W, 70], fill=(0, 0, 0, 170))
+    draw.rectangle([0, 66, W, 70], fill=GOLD)
 
     header = f"Bhagavad Gita | Chapter {chapter} Verse {verse}"
-    draw.text((W//2, 30), header, font=font_header, fill=GOLD, anchor="mm")
+    draw_text_shadow(draw, (W//2, 35), header, font_header, GOLD)
 
-    # BLUR PANEL
-    panel_top = H - 360
+    # 🔥 BETTER PANEL SIZE
+    panel_top = H - 320
 
-    blurred = img.crop((0, panel_top, W, H)).filter(ImageFilter.GaussianBlur(12))
+    # Reduced blur (more cinematic)
+    blurred = img.crop((0, panel_top, W, H)).filter(ImageFilter.GaussianBlur(6))
     img.paste(blurred, (0, panel_top))
 
-    draw.rectangle([0, panel_top, W, H], fill=(0, 0, 0, 110))
+    draw.rectangle([0, panel_top, W, H], fill=(0, 0, 0, 120))
     draw.rectangle([0, panel_top, W, panel_top+4], fill=GOLD)
 
-    x = 30
-    y = panel_top + 20
+    x = 40
+    y = panel_top + 25
 
     # Sanskrit
-    draw.text((x, y), "॥ Sanskrit ॥", font=font_label, fill=LABEL)
-    y += 28
+    draw_text_shadow(draw, (x, y), "॥ Sanskrit ॥", font_label, LABEL)
+    y += 32
+
     for line in textwrap.wrap(sanskrit, width=36):
-        draw.text((x, y), line, font=font_sanskrit, fill=GOLD)
-        y += 42
+        draw_text_shadow(draw, (x, y), line, font_sanskrit, GOLD)
+        y += 46
 
     y += 10
-    draw.line([x, y, W-x, y], fill=(255,255,255,60), width=1)
-    y += 14
+    draw.line([x, y, W-x, y], fill=(255,255,255,80), width=1)
+    y += 16
 
-    # Meaning
-    draw.text((x, y), "Meaning", font=font_label, fill=LABEL)
-    y += 28
+    # 🔥 Highlight Meaning
+    draw_text_shadow(draw, (x, y), "🔥 Meaning", font_label, LABEL)
+    y += 32
+
     for line in textwrap.wrap(meaning, width=52):
-        draw.text((x, y), line, font=font_meaning, fill=WHITE)
-        y += 34
+        draw_text_shadow(draw, (x, y), line, font_meaning, WHITE)
+        y += 36
 
     y += 10
-    draw.line([x, y, W-x, y], fill=(255,255,255,60), width=1)
-    y += 14
+    draw.line([x, y, W-x, y], fill=(255,255,255,80), width=1)
+    y += 16
 
     # Telugu
-    draw.text((x, y), "తెలుగు అనువాదం", font=font_label, fill=LABEL)
-    y += 28
+    draw_text_shadow(draw, (x, y), "🟢 తెలుగు అనువాదం", font_label, LABEL)
+    y += 32
+
     for line in textwrap.wrap(telugu_translation, width=38):
-        draw.text((x, y), line, font=font_telugu, fill=GREEN)
-        y += 40
+        draw_text_shadow(draw, (x, y), line, font_telugu, GREEN)
+        y += 42
 
     final = Image.alpha_composite(img, overlay)
     final.convert("RGB").save(output_path, "JPEG", quality=95)
@@ -148,12 +158,12 @@ def render_video():
             mixed
         ], check=True)
 
-        # Render video (LANDSCAPE + ZOOM EFFECT)
+        # 🔥 BETTER ZOOM (more cinematic)
         subprocess.run([
             'ffmpeg','-y',
             '-loop','1','-i', text_img,
             '-i', mixed,
-            '-vf',"zoompan=z='min(zoom+0.0015,1.2)':d=125,scale=1280:720",
+            '-vf',"zoompan=z='min(zoom+0.0018,1.25)':d=125,scale=1280:720",
             '-c:v','libx264',
             '-preset','ultrafast',
             '-tune','stillimage',
