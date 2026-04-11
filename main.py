@@ -27,7 +27,6 @@ def draw_text_on_image(img_path, output_path, chapter, verse):
     top  = (new_h - H) // 2
     img  = img.crop((left, top, left + W, top + H))
 
-    # Cinematic overlay
     darkener = Image.new("RGBA", (W, H), (0, 0, 0, 70))
     img = Image.alpha_composite(img, darkener)
 
@@ -40,7 +39,6 @@ def draw_text_on_image(img_path, output_path, chapter, verse):
 
     GOLD = (255,215,0,255)
 
-    # Header
     draw.rectangle([0,0,W,70], fill=(0,0,0,180))
     draw.rectangle([0,66,W,70], fill=GOLD)
 
@@ -48,6 +46,40 @@ def draw_text_on_image(img_path, output_path, chapter, verse):
     draw.text((W//2,35), header, fill=GOLD, font=font_header, anchor="mm")
 
     img.convert("RGB").save(output_path, "JPEG", quality=95)
+
+
+def get_audio_duration(path):
+    """Get duration of audio file in seconds using ffprobe"""
+    result = subprocess.run([
+        'ffprobe', '-v', 'quiet', '-print_format', 'json',
+        '-show_streams', path
+    ], capture_output=True, text=True)
+    import json
+    data = json.loads(result.stdout)
+    for stream in data.get('streams', []):
+        if 'duration' in stream:
+            return float(stream['duration'])
+    return 60.0  # fallback
+
+
+def escape_ffmpeg_text(text):
+    """Properly escape text for ffmpeg drawtext filter"""
+    # Escape special characters for ffmpeg drawtext
+    text = text.replace('\\', '\\\\')
+    text = text.replace(':', '\\:')
+    text = text.replace("'", "\u2019")  # Replace apostrophe with right single quote
+    text = text.replace('%', '\\%')
+    text = text.replace('[', '\\[')
+    text = text.replace(']', '\\]')
+    return text
+
+
+def find_font(preferred_list):
+    """Find first available font from list"""
+    for font_path in preferred_list:
+        if os.path.exists(font_path):
+            return font_path
+    return None
 
 
 # ---------------- API ---------------- #
@@ -58,9 +90,9 @@ def render_video():
         image_file = request.files.get('image') or request.files.get('data')
         music_url  = request.form.get('music_url')
 
-        sanskrit = request.form.get('sanskrit', '').replace(":", "\\:").replace("'", "\\'")
-        meaning  = request.form.get('meaning', '').replace(":", "\\:").replace("'", "\\'")
-        telugu   = request.form.get('telugu_translation', '').replace(":", "\\:").replace("'", "\\'")
+        sanskrit = request.form.get('sanskrit', '')
+        meaning  = request.form.get('meaning', '')
+        telugu   = request.form.get('telugu_translation', '')
         chapter  = request.form.get('chapter', '')
         verse    = request.form.get('verse', '')
 
@@ -69,12 +101,12 @@ def render_video():
 
         tmpdir = tempfile.mkdtemp()
 
-        img_path = os.path.join(tmpdir, 'img.jpg')
-        text_img = os.path.join(tmpdir, 'text.jpg')
+        img_path   = os.path.join(tmpdir, 'img.jpg')
+        text_img   = os.path.join(tmpdir, 'text.jpg')
         audio_path = os.path.join(tmpdir, 'voice.mp3')
         music_path = os.path.join(tmpdir, 'music.mp3')
-        mixed = os.path.join(tmpdir, 'mixed.mp3')
-        output = os.path.join(tmpdir, 'out.mp4')
+        mixed      = os.path.join(tmpdir, 'mixed.mp3')
+        output     = os.path.join(tmpdir, 'out.mp4')
 
         image_file.save(img_path)
         audio_file.save(audio_path)
@@ -87,6 +119,13 @@ def render_video():
         # Draw base image
         draw_text_on_image(img_path, text_img, chapter, verse)
 
+        # Get actual audio duration and split into 3 equal parts
+        duration = get_audio_duration(audio_path)
+        third = duration / 3
+        t1_start, t1_end = 0, third
+        t2_start, t2_end = third, third * 2
+        t3_start, t3_end = third * 2, duration
+
         # Mix audio
         subprocess.run([
             'ffmpeg','-y',
@@ -96,26 +135,79 @@ def render_video():
             mixed
         ], check=True)
 
-        # 🔥 ANIMATED TEXT + SLOW ZOOM
-        vf_text = f"""
-        zoompan=z='min(zoom+0.0005,1.1)':d=300,
-        scale=1280:720,
+        # ── Font selection ──────────────────────────────────────────────
+        # Sanskrit (Devanagari) font
+        sanskrit_font = find_font([
+            '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf',
+            '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf',
+            '/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.otf',
+            '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
+        ])
 
-        drawtext=text='{sanskrit}':
-        fontcolor=yellow:fontsize=42:
-        x=(w-text_w)/2:y=h-260:
-        enable='between(t,0,12)',
+        # English font
+        english_font = find_font([
+            '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+        ])
 
-        drawtext=text='{meaning}':
-        fontcolor=white:fontsize=30:
-        x=(w-text_w)/2:y=h-170:
-        enable='between(t,12,28)',
+        # Telugu font
+        telugu_font = find_font([
+            '/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf',
+            '/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf',
+            '/usr/share/fonts/opentype/noto/NotoSansTelugu-Regular.otf',
+            '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
+        ])
 
-        drawtext=text='{telugu}':
-        fontcolor=green:fontsize=36:
-        x=(w-text_w)/2:y=h-90:
-        enable='between(t,28,50)'
-        """
+        # Fallback if fonts not found
+        fallback = '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf'
+        sanskrit_font = sanskrit_font or fallback
+        english_font  = english_font  or fallback
+        telugu_font   = telugu_font   or fallback
+
+        # Escape text safely
+        sanskrit_esc = escape_ffmpeg_text(sanskrit)
+        meaning_esc  = escape_ffmpeg_text(meaning)
+        telugu_esc   = escape_ffmpeg_text(telugu)
+
+        # ── Build drawtext filters with correct fonts ───────────────────
+        # Sanskrit text — shown during first third of audio
+        sanskrit_filter = (
+            f"drawtext=text='{sanskrit_esc}'"
+            f":fontfile='{sanskrit_font}'"
+            f":fontcolor=yellow:fontsize=44"
+            f":x=(w-text_w)/2:y=h-220"
+            f":box=1:boxcolor=black@0.5:boxborderw=10"
+            f":enable='between(t,{t1_start:.2f},{t1_end:.2f})'"
+        )
+
+        # English meaning — shown during second third
+        meaning_filter = (
+            f"drawtext=text='{meaning_esc}'"
+            f":fontfile='{english_font}'"
+            f":fontcolor=white:fontsize=32"
+            f":x=(w-text_w)/2:y=h-160"
+            f":box=1:boxcolor=black@0.5:boxborderw=8"
+            f":enable='between(t,{t2_start:.2f},{t2_end:.2f})'"
+        )
+
+        # Telugu translation — shown during last third
+        telugu_filter = (
+            f"drawtext=text='{telugu_esc}'"
+            f":fontfile='{telugu_font}'"
+            f":fontcolor=#90EE90:fontsize=38"
+            f":x=(w-text_w)/2:y=h-100"
+            f":box=1:boxcolor=black@0.5:boxborderw=8"
+            f":enable='between(t,{t3_start:.2f},{t3_end:.2f})'"
+        )
+
+        vf_text = (
+            "zoompan=z='min(zoom+0.0005,1.1)':d=300,"
+            "scale=1280:720,"
+            f"{sanskrit_filter},"
+            f"{meaning_filter},"
+            f"{telugu_filter}"
+        )
 
         subprocess.run([
             'ffmpeg','-y',
