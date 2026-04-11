@@ -1,88 +1,168 @@
-import os, subprocess, tempfile, requests
+import os, subprocess, tempfile, requests, json
 from flask import Flask, request, jsonify, send_file
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont
 import textwrap
 
 app = Flask(__name__)
 
-# ---------------- IMAGE RENDER ---------------- #
-def draw_text_on_image(img_path, output_path, chapter, verse):
-    W, H = 1280, 720
+# ── Font paths ────────────────────────────────────────────────────────────────
+FONT_PATHS = {
+    "header":   ["/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"],
+    "sanskrit": [
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.otf",
+    ],
+    "english":  [
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ],
+    "telugu":   [
+        "/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansTelugu-Regular.otf",
+    ],
+}
 
-    img = Image.open(img_path).convert("RGBA")
-
-    img_ratio = img.width / img.height
-    target_ratio = W / H
-
-    if img_ratio > target_ratio:
-        new_h = H
-        new_w = int(H * img_ratio)
-    else:
-        new_w = W
-        new_h = int(W / img_ratio)
-
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-
-    left = (new_w - W) // 2
-    top  = (new_h - H) // 2
-    img  = img.crop((left, top, left + W, top + H))
-
-    darkener = Image.new("RGBA", (W, H), (0, 0, 0, 70))
-    img = Image.alpha_composite(img, darkener)
-
-    draw = ImageDraw.Draw(img)
-
-    try:
-        font_header = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf", 40)
-    except:
-        font_header = ImageFont.load_default()
-
-    GOLD = (255,215,0,255)
-
-    draw.rectangle([0,0,W,70], fill=(0,0,0,180))
-    draw.rectangle([0,66,W,70], fill=GOLD)
-
-    header = f"Bhagavad Gita | Chapter {chapter} Verse {verse}"
-    draw.text((W//2,35), header, fill=GOLD, font=font_header, anchor="mm")
-
-    img.convert("RGB").save(output_path, "JPEG", quality=95)
+def find_font(key, size=40):
+    for path in FONT_PATHS[key]:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
 
 
 def get_audio_duration(path):
-    """Get duration of audio file in seconds using ffprobe"""
     result = subprocess.run([
-        'ffprobe', '-v', 'quiet', '-print_format', 'json',
-        '-show_streams', path
+        'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', path
     ], capture_output=True, text=True)
-    import json
     data = json.loads(result.stdout)
     for stream in data.get('streams', []):
         if 'duration' in stream:
             return float(stream['duration'])
-    return 60.0  # fallback
+    return 60.0
 
 
-def escape_ffmpeg_text(text):
-    """Properly escape text for ffmpeg drawtext filter"""
-    # Escape special characters for ffmpeg drawtext
-    text = text.replace('\\', '\\\\')
-    text = text.replace(':', '\\:')
-    text = text.replace("'", "\u2019")  # Replace apostrophe with right single quote
-    text = text.replace('%', '\\%')
-    text = text.replace('[', '\\[')
-    text = text.replace(']', '\\]')
-    return text
+def wrap_text(text, font, max_width, draw):
+    """Word-wrap text to fit within max_width pixels."""
+    words = text.split()
+    lines, current = [], ""
+    for word in words:
+        test = (current + " " + word).strip()
+        bbox = draw.textbbox((0, 0), test, font=font)
+        if bbox[2] <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
 
 
-def find_font(preferred_list):
-    """Find first available font from list"""
-    for font_path in preferred_list:
-        if os.path.exists(font_path):
-            return font_path
-    return None
+def render_text_layer(size, text, font, color, max_width, line_height_extra=8):
+    """
+    Render wrapped text onto a transparent RGBA layer.
+    Returns (layer_image, total_height).
+    """
+    W, H = size
+    # Temp draw to measure
+    tmp = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(tmp)
+    lines = wrap_text(text, font, max_width, draw)
+
+    # Measure line height
+    sample_bbox = draw.textbbox((0, 0), "Ag", font=font)
+    line_h = sample_bbox[3] - sample_bbox[1] + line_height_extra
+
+    total_h = line_h * len(lines)
+    layer = Image.new("RGBA", (W, total_h + 20), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+
+    y = 10
+    for line in lines:
+        bbox = d.textbbox((0, 0), line, font=font)
+        tw = bbox[2] - bbox[0]
+        x = (W - tw) // 2
+        # Shadow for readability
+        d.text((x + 2, y + 2), line, font=font, fill=(0, 0, 0, 200))
+        d.text((x, y), line, font=font, fill=color)
+        y += line_h
+
+    return layer, total_h + 20
 
 
-# ---------------- API ---------------- #
+# ── THREE FRAMES: one per language ───────────────────────────────────────────
+def build_frames(img_path, out_dir, chapter, verse, sanskrit, english, telugu):
+    """
+    Build 3 JPEG frames — each has the background + header + one text block.
+    Returns list of frame paths [sanskrit_frame, english_frame, telugu_frame].
+    """
+    W, H = 1280, 720
+
+    def load_bg():
+        img = Image.open(img_path).convert("RGBA")
+        ratio = img.width / img.height
+        if ratio > W / H:
+            new_h, new_w = H, int(H * ratio)
+        else:
+            new_w, new_h = W, int(W / ratio)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        left, top = (new_w - W) // 2, (new_h - H) // 2
+        img = img.crop((left, top, left + W, top + H))
+        img = Image.alpha_composite(img, Image.new("RGBA", (W, H), (0, 0, 0, 80)))
+        return img
+
+    font_header  = find_font("header",   40)
+    font_sanskrit = find_font("sanskrit", 46)
+    font_english  = find_font("english",  34)
+    font_telugu   = find_font("telugu",   44)  # Larger for Telugu clarity
+
+    GOLD       = (255, 215,   0, 255)
+    WHITE      = (255, 255, 255, 255)
+    YELLOW     = (255, 230,   0, 255)
+    LIGHT_GREEN = (144, 238, 144, 255)
+
+    header_text = f"Bhagavad Gita | Chapter {chapter} Verse {verse}"
+    max_text_w  = W - 80  # 40px padding each side
+
+    configs = [
+        ("sanskrit_frame.jpg", sanskrit, font_sanskrit, YELLOW),
+        ("english_frame.jpg",  english,  font_english,  WHITE),
+        ("telugu_frame.jpg",   telugu,   font_telugu,   LIGHT_GREEN),
+    ]
+
+    frame_paths = []
+    for filename, text, font, color in configs:
+        bg = load_bg()
+        draw = ImageDraw.Draw(bg)
+
+        # Header bar
+        draw.rectangle([0, 0, W, 72], fill=(0, 0, 0, 190))
+        draw.rectangle([0, 68, W, 72], fill=GOLD)
+        draw.text((W // 2, 36), header_text, fill=GOLD, font=font_header, anchor="mm")
+
+        # Text block — rendered as a layer, then composited
+        text_layer, text_h = render_text_layer(
+            (W, H), text, font, color, max_text_w
+        )
+
+        # Dark backing strip behind text
+        strip_y = H - text_h - 20
+        strip = Image.new("RGBA", (W, text_h + 20), (0, 0, 0, 160))
+        bg.alpha_composite(strip, (0, strip_y))
+
+        # Composite text on top
+        bg.alpha_composite(text_layer, (0, strip_y + 10))
+
+        path = os.path.join(out_dir, filename)
+        bg.convert("RGB").save(path, "JPEG", quality=95)
+        frame_paths.append(path)
+
+    return frame_paths  # [sanskrit, english, telugu]
+
+
+# ── API ───────────────────────────────────────────────────────────────────────
 @app.route('/render', methods=['POST'])
 def render_video():
     try:
@@ -102,123 +182,79 @@ def render_video():
         tmpdir = tempfile.mkdtemp()
 
         img_path   = os.path.join(tmpdir, 'img.jpg')
-        text_img   = os.path.join(tmpdir, 'text.jpg')
         audio_path = os.path.join(tmpdir, 'voice.mp3')
         music_path = os.path.join(tmpdir, 'music.mp3')
         mixed      = os.path.join(tmpdir, 'mixed.mp3')
+        concat_txt = os.path.join(tmpdir, 'concat.txt')
         output     = os.path.join(tmpdir, 'out.mp4')
 
         image_file.save(img_path)
         audio_file.save(audio_path)
 
-        # Download music
         r = requests.get(music_url)
         with open(music_path, 'wb') as f:
             f.write(r.content)
 
-        # Draw base image
-        draw_text_on_image(img_path, text_img, chapter, verse)
+        # Build 3 frames (one per language)
+        frames = build_frames(
+            img_path, tmpdir, chapter, verse, sanskrit, meaning, telugu
+        )
+        sanskrit_frame, english_frame, telugu_frame = frames
 
-        # Get actual audio duration and split into 3 equal parts
+        # Get audio duration, split into 3 equal parts
         duration = get_audio_duration(audio_path)
         third = duration / 3
-        t1_start, t1_end = 0, third
-        t2_start, t2_end = third, third * 2
-        t3_start, t3_end = third * 2, duration
 
         # Mix audio
         subprocess.run([
-            'ffmpeg','-y',
+            'ffmpeg', '-y',
             '-i', audio_path,
             '-i', music_path,
-            '-filter_complex','[1:a]volume=0.12[bg];[0:a][bg]amix=inputs=2:duration=first',
+            '-filter_complex', '[1:a]volume=0.12[bg];[0:a][bg]amix=inputs=2:duration=first',
             mixed
         ], check=True)
 
-        # ── Font selection ──────────────────────────────────────────────
-        # Sanskrit (Devanagari) font
-        sanskrit_font = find_font([
-            '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf',
-            '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf',
-            '/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.otf',
-            '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
-        ])
+        # Build each segment as a separate video clip
+        clips = []
+        for i, (frame, dur) in enumerate([
+            (sanskrit_frame, third),
+            (english_frame,  third),
+            (telugu_frame,   duration - 2 * third),  # remainder to avoid float drift
+        ]):
+            clip_path = os.path.join(tmpdir, f'clip_{i}.mp4')
+            subprocess.run([
+                'ffmpeg', '-y',
+                '-loop', '1', '-i', frame,
+                '-t', str(dur),
+                '-vf', "zoompan=z='min(zoom+0.0004,1.08)':d=125:s=1280x720,scale=1280:720",
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-pix_fmt', 'yuv420p',
+                '-r', '25',
+                clip_path
+            ], check=True)
+            clips.append(clip_path)
 
-        # English font
-        english_font = find_font([
-            '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
-            '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-            '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
-        ])
+        # Concatenate the 3 silent clips
+        with open(concat_txt, 'w') as f:
+            for clip in clips:
+                f.write(f"file '{clip}'\n")
 
-        # Telugu font
-        telugu_font = find_font([
-            '/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf',
-            '/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf',
-            '/usr/share/fonts/opentype/noto/NotoSansTelugu-Regular.otf',
-            '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
-        ])
-
-        # Fallback if fonts not found
-        fallback = '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf'
-        sanskrit_font = sanskrit_font or fallback
-        english_font  = english_font  or fallback
-        telugu_font   = telugu_font   or fallback
-
-        # Escape text safely
-        sanskrit_esc = escape_ffmpeg_text(sanskrit)
-        meaning_esc  = escape_ffmpeg_text(meaning)
-        telugu_esc   = escape_ffmpeg_text(telugu)
-
-        # ── Build drawtext filters with correct fonts ───────────────────
-        # Sanskrit text — shown during first third of audio
-        sanskrit_filter = (
-            f"drawtext=text='{sanskrit_esc}'"
-            f":fontfile='{sanskrit_font}'"
-            f":fontcolor=yellow:fontsize=44"
-            f":x=(w-text_w)/2:y=h-220"
-            f":box=1:boxcolor=black@0.5:boxborderw=10"
-            f":enable='between(t,{t1_start:.2f},{t1_end:.2f})'"
-        )
-
-        # English meaning — shown during second third
-        meaning_filter = (
-            f"drawtext=text='{meaning_esc}'"
-            f":fontfile='{english_font}'"
-            f":fontcolor=white:fontsize=32"
-            f":x=(w-text_w)/2:y=h-160"
-            f":box=1:boxcolor=black@0.5:boxborderw=8"
-            f":enable='between(t,{t2_start:.2f},{t2_end:.2f})'"
-        )
-
-        # Telugu translation — shown during last third
-        telugu_filter = (
-            f"drawtext=text='{telugu_esc}'"
-            f":fontfile='{telugu_font}'"
-            f":fontcolor=#90EE90:fontsize=38"
-            f":x=(w-text_w)/2:y=h-100"
-            f":box=1:boxcolor=black@0.5:boxborderw=8"
-            f":enable='between(t,{t3_start:.2f},{t3_end:.2f})'"
-        )
-
-        vf_text = (
-            "zoompan=z='min(zoom+0.0005,1.1)':d=300,"
-            "scale=1280:720,"
-            f"{sanskrit_filter},"
-            f"{meaning_filter},"
-            f"{telugu_filter}"
-        )
-
+        silent_concat = os.path.join(tmpdir, 'silent.mp4')
         subprocess.run([
-            'ffmpeg','-y',
-            '-loop','1','-i', text_img,
+            'ffmpeg', '-y',
+            '-f', 'concat', '-safe', '0', '-i', concat_txt,
+            '-c', 'copy',
+            silent_concat
+        ], check=True)
+
+        # Add mixed audio to the concatenated video
+        subprocess.run([
+            'ffmpeg', '-y',
+            '-i', silent_concat,
             '-i', mixed,
-            '-vf', vf_text,
-            '-c:v','libx264',
-            '-preset','ultrafast',
-            '-tune','stillimage',
-            '-c:a','aac',
-            '-pix_fmt','yuv420p',
+            '-c:v', 'copy',
+            '-c:a', 'aac',
             '-shortest',
             output
         ], check=True)
