@@ -1,5 +1,5 @@
 import os, subprocess, tempfile, requests, json
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__)
@@ -18,7 +18,7 @@ def find_font(key, size=40):
             return ImageFont.truetype(path, size)
     return ImageFont.load_default()
 
-# ── METADATA GENERATOR ─────────────────────────────────
+# ── METADATA (KEEP FOR FUTURE USE) ─────────────────────
 def generate_youtube_metadata(chapter, verse, sanskrit, meaning, telugu, channel_name="FactShastra"):
     title = f"Bhagavad Gita Chapter {chapter} Verse {verse} | గీత సారం | {channel_name}"
 
@@ -80,11 +80,12 @@ def render_video():
         image_file.save(img_path)
         audio_file.save(audio_path)
 
+        # download background music
         r = requests.get(music_url)
         with open(music_path, 'wb') as f:
             f.write(r.content)
 
-        # 🔥 SIMPLE VIDEO CREATION
+        # 🎬 VIDEO CREATION (WORKING)
         subprocess.run([
             'ffmpeg', '-y',
             '-loop', '1', '-i', img_path,
@@ -97,18 +98,8 @@ def render_video():
             output
         ], check=True)
 
-        # 🔥 GENERATE METADATA
-        metadata = generate_youtube_metadata(
-            chapter, verse, sanskrit, meaning, telugu, channel_name
-        )
-
-        # ✅ IMPORTANT FIX (THIS IS WHAT YOU NEEDED)
-        return jsonify({
-            "video_path": output,
-            "title": metadata["title"],
-            "description": metadata["description"],
-            "tags": metadata["tags"]
-        })
+        # ✅ RETURN VIDEO FILE (THIS FIXES EVERYTHING)
+        return send_file(output, mimetype='video/mp4')
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
